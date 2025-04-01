@@ -48,7 +48,7 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         $this->name = 'ps_categoryproducts';
         $this->tab = 'pricing_promotion';
         $this->author = 'PrestaShop';
-        $this->version = '1.0.7';
+        $this->version = '1.0.8';
 
         $this->bootstrap = true;
         parent::__construct();
@@ -60,7 +60,7 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         $this->templateFile = 'module:ps_categoryproducts/views/templates/hook/ps_categoryproducts.tpl';
     }
 
-    public function install()
+    public function install(): bool
     {
         return parent::install()
             && Configuration::updateValue('CATEGORYPRODUCTS_DISPLAY_PRICE', 1)
@@ -72,18 +72,14 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         ;
     }
 
-    public function uninstall()
+    public function uninstall(): bool
     {
-        if (!parent::uninstall() ||
+        return !(!parent::uninstall() ||
             !Configuration::deleteByName('CATEGORYPRODUCTS_DISPLAY_PRICE') ||
-            !Configuration::deleteByName('CATEGORYPRODUCTS_DISPLAY_PRODUCTS')) {
-            return false;
-        }
-
-        return true;
+            !Configuration::deleteByName('CATEGORYPRODUCTS_DISPLAY_PRODUCTS'));
     }
 
-    public function getContent()
+    public function getContent(): string
     {
         $this->html = '';
 
@@ -107,19 +103,37 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         return $this->html;
     }
 
-    public function hookAddProduct($params)
+    /**
+     * @param array{
+     *     id_product_old: ?int,
+     *     id_product: int,
+     *     product: Product
+     * } $params
+     */
+    public function hookAddProduct(array $params)
     {
-        return $this->clearCache($params);
+        $this->clearCache($params);
     }
 
-    public function hookUpdateProduct($params)
+    /**
+     * @param array{
+     *     id_product: int
+     * } $params a key "product" of type Product may be present depending on which class executing the hook.
+     */
+    public function hookUpdateProduct(array $params)
     {
-        return $this->clearCache($params);
+        $this->clearCache($params);
     }
 
-    public function hookDeleteProduct($params)
+    /**
+     * @param array{
+     *     id_product: int,
+     *     product: Product
+     * } $params
+     */
+    public function hookDeleteProduct(array $params)
     {
-        return $this->clearCache($params);
+        $this->clearCache($params);
     }
 
     private function clearCache($params)
@@ -131,11 +145,9 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         } else {
             $this->_clearCache($this->templateFile);
         }
-
-        return;
     }
 
-    public function renderForm()
+    public function renderForm(): array
     {
         $fields_form = [
             'form' => [
@@ -201,7 +213,7 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         return $helper->generateForm([$fields_form]);
     }
 
-    public function getConfigFieldsValues()
+    public function getConfigFieldsValues(): array
     {
         return [
             'CATEGORYPRODUCTS_DISPLAY_PRICE' => Configuration::get('CATEGORYPRODUCTS_DISPLAY_PRICE'),
@@ -214,7 +226,7 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         $params = $this->getInformationFromConfiguration($configuration);
 
         if ($params) {
-            $products = $this->getCategoryProducts($params['id_product'], $params['id_category']);
+            $products = $this->getCategoryProducts((int) $params['id_product'], (int) $params['id_category']);
 
             if (!empty($products)) {
                 return [
@@ -230,68 +242,59 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
     {
         $params = $this->getInformationFromConfiguration($configuration);
 
-        if ($params) {
-            if ((int) Configuration::get('CATEGORYPRODUCTS_DISPLAY_PRODUCTS') > 0) {
-                // Need variables only if this template isn't cached
-                if (!$this->isCached($this->templateFile, $params['cache_id'])) {
-                    if (!empty($params['id_category'])) {
-                        $category = new Category((int) $params['id_category']);
-                    }
-
-                    if (empty($category) || !Validate::isLoadedObject($category) || !$category->active) {
-                        return false;
-                    }
-
-                    $variables = $this->getWidgetVariables($hookName, $configuration);
-
-                    if (empty($variables)) {
-                        return false;
-                    }
-
-                    $this->smarty->assign($variables);
+        if ($params && (int)Configuration::get('CATEGORYPRODUCTS_DISPLAY_PRODUCTS') > 0) {
+            // Need variables only if this template isn't cached
+            if (!$this->isCached($this->templateFile, $params['cache_id'])) {
+                if (!empty($params['id_category'])) {
+                    $category = new Category((int) $params['id_category']);
                 }
 
-                return $this->fetch(
-                    $this->templateFile,
-                    $params['cache_id']
-                );
+                if ($category === null || !$category->active || !Validate::isLoadedObject($category)) {
+                    return false;
+                }
+
+                $variables = $this->getWidgetVariables($hookName, $configuration);
+
+                if (empty($variables)) {
+                    return false;
+                }
+
+                $this->smarty->assign($variables);
             }
+
+            return $this->fetch(
+                $this->templateFile,
+                $params['cache_id']
+            );
         }
 
         return false;
     }
 
-    private function getCategoryProducts($idProduct, $idCategory)
+    private function getCategoryProducts(int $idProduct, int $idCategory): array
     {
         $category = new Category($idCategory);
         $showPrice = (bool) Configuration::get('CATEGORYPRODUCTS_DISPLAY_PRICE');
-
         $searchProvider = new CategoryProductSearchProvider(
             $this->getTranslator(),
             $category
         );
-
         $context = new ProductSearchContext($this->context);
-
         $query = new ProductSearchQuery();
-
         $nProducts = (int) Configuration::get('CATEGORYPRODUCTS_DISPLAY_PRODUCTS') + 1; // +1 If current product is found
-
         $query
             ->setResultsPerPage($nProducts)
             ->setPage(1)
         ;
-
         $query->setSortOrder(SortOrder::random());
-
         $result = $searchProvider->runQuery(
             $context,
             $query
         );
-
         $assembler = new ProductAssembler($this->context);
         $presenterFactory = new ProductPresenterFactory($this->context);
         $presentationSettings = $presenterFactory->getPresentationSettings();
+
         if (version_compare(_PS_VERSION_, '1.7.5', '>=')) {
             $presenter = new \PrestaShop\PrestaShop\Adapter\Presenter\Product\ProductListingPresenter(
                 new ImageRetriever(
@@ -315,9 +318,7 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         }
 
         $productsForTemplate = [];
-
         $presentationSettings->showPrices = $showPrice;
-
         $products = $result->getProducts();
 
         foreach ($products as $rawProduct) {
@@ -334,31 +335,32 @@ class Ps_Categoryproducts extends Module implements WidgetInterface
         return $productsForTemplate;
     }
 
-    private function getInformationFromConfiguration($configuration)
+    private function getInformationFromConfiguration($configuration): array
     {
         if (empty($configuration['product'])) {
-            return false;
+            return [];
         }
 
         $product = $configuration['product'];
+
         if ($product instanceof Product) {
             $product = (array) $product;
             $product['id_product'] = $product['id'];
         }
 
-        $id_product = $product['id_product'];
-        $id_category = (isset($configuration['category']->id) ? (int) $configuration['category']->id : (int) $product['id_category_default']);
+        $productId = $product['id_product'];
+        $categoryId = (isset($configuration['category']->id) ? (int) $configuration['category']->id : (int) $product['id_category_default']);
 
-        if (!empty($id_product) && !empty($id_category)) {
-            $cache_id = 'ps_categoryproducts|' . $id_product . '|' . $id_category;
+        if (!empty($productId) && !empty($categoryId)) {
+            $cache_id = 'ps_categoryproducts|' . $productId . '|' . $categoryId;
 
             return [
-                'id_product' => $id_product,
-                'id_category' => $id_category,
+                'id_product' => $productId,
+                'id_category' => $categoryId,
                 'cache_id' => $this->getCacheId($cache_id),
             ];
         }
 
-        return false;
+        return [];
     }
 }
